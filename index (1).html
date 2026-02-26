@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Event Tracking Dashboard — Mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Noto Sans JP', sans-serif; overflow: hidden; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useCallback, useEffect } = React;
+
+/* ── MOCK DATA ── */
+const TAGS = ["VIP", "スポンサー", "一般参加", "プレス", "スピーカー"];
+const USERS = [
+  { id: 1, name: "田中 太郎", company: "テック株式会社", tags: ["VIP", "スピーカー"], initials: "田" },
+  { id: 2, name: "佐藤 花子", company: "デザインラボ合同会社", tags: ["一般参加"], initials: "佐" },
+  { id: 3, name: "山田 一郎", company: "フューチャー・AI社", tags: ["スポンサー", "VIP"], initials: "山" },
+  { id: 4, name: "鈴木 美咲", company: "グローバルメディアInc.", tags: ["プレス"], initials: "鈴" },
+  { id: 5, name: "高橋 健太", company: "クラウドシステムズ株式会社", tags: ["一般参加"], initials: "高" },
+  { id: 6, name: "伊藤 さくら", company: "エッジコンサルティング", tags: ["VIP"], initials: "伊" },
+  { id: 7, name: "渡辺 翔太", company: "ロボティクス・ジャパン", tags: ["スポンサー"], initials: "渡" },
+  { id: 8, name: "中村 あかり", company: "データサイエンス研究所", tags: ["スピーカー"], initials: "中" },
+];
+const TIME_SLOTS = [
+  { label: "全時間帯", value: "all" },
+  { label: "09:00–10:00", value: "09" }, { label: "10:00–11:00", value: "10" },
+  { label: "11:00–12:00", value: "11" }, { label: "12:00–13:00", value: "12" },
+  { label: "13:00–14:00", value: "13" }, { label: "14:00–15:00", value: "14" },
+  { label: "15:00–16:00", value: "15" }, { label: "16:00–17:00", value: "16" },
+];
+
+function generateCheckins(cameras) {
+  if (cameras.length === 0) return {};
+  const data = {};
+  const times = ["08:45","08:50","08:55","09:00","09:02","09:10","09:15","09:25","09:30","09:40","10:00","10:20","10:30","10:35","10:40","10:50","11:00","11:12","11:30","11:40","11:45","11:50","11:55","12:00","12:05","12:20","12:30","12:40","12:50","13:00","13:10","13:20","13:30","13:50","14:00","14:10","14:20","14:30","14:40","14:45","15:00","15:10","15:30","15:45","16:00","16:10","16:20","16:30"];
+  USERS.forEach((user) => {
+    const count = 4 + Math.floor(Math.random() * 6);
+    const usedTimes = []; const checkins = [];
+    for (let i = 0; i < count; i++) { let t; do { t = times[Math.floor(Math.random() * times.length)]; } while (usedTimes.includes(t)); usedTimes.push(t); checkins.push({ time: t, camId: cameras[Math.floor(Math.random() * cameras.length)].id }); }
+    checkins.sort((a, b) => a.time.localeCompare(b.time));
+    data[user.id] = checkins;
+  });
+  return data;
+}
+
+function generateMockNotification(cameras) {
+  const user = USERS[Math.floor(Math.random() * USERS.length)];
+  const cam = cameras[Math.floor(Math.random() * cameras.length)];
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+  return { id: Date.now() + Math.random(), user, cam, time, read: false };
+}
+
+function getHeatmapData(cameras, checkins, timeFilter, tagFilter) {
+  const counts = {}; cameras.forEach((c) => (counts[c.id] = 0));
+  Object.entries(checkins).forEach(([userId, cks]) => { const user = USERS.find((u) => u.id === Number(userId)); if (tagFilter !== "all" && !user.tags.includes(tagFilter)) return; cks.forEach((ci) => { if (timeFilter === "all" || ci.time.startsWith(timeFilter)) { if (counts[ci.camId] !== undefined) counts[ci.camId]++; } }); });
+  return counts;
+}
+function getFilteredCheckins(allCheckins, userId, timeFilter) { const all = allCheckins[userId] || []; if (timeFilter === "all") return all; return all.filter((ci) => ci.time.startsWith(timeFilter)); }
+
+/* ── DESIGN TOKENS ── */
+const C = {
+  primary: "#2c74bb", primaryLight: "#e8f0f9", primaryDim: "rgba(44,116,187,0.08)", primaryBorder: "rgba(44,116,187,0.2)",
+  sub: "#12a5d8", subLight: "#e6f6fb",
+  bg: "#f5f7fa", surface: "#ffffff", surfaceHover: "#f0f3f7", surfaceAlt: "#fafbfc",
+  border: "#e2e6ed", borderLight: "#edf0f4", borderActive: "#2c74bb",
+  text: "#1a2332", textSecondary: "#5a6578", textMuted: "#8e99a8", textOnPrimary: "#ffffff",
+  danger: "#e5534b", success: "#2da44e", warning: "#d4a72c",
+  tagVIP: { bg: "#fef3cd", color: "#856404", border: "#f9e79f" }, tagSponsor: { bg: "#e8dff5", color: "#6f42c1", border: "#d3c4f3" },
+  tagPress: { bg: "#fce4ec", color: "#c62828", border: "#f8bbd0" }, tagSpeaker: { bg: "#e6f6fb", color: "#0c7ea8", border: "#b3e5f6" },
+  tagGeneral: { bg: "#edf0f4", color: "#5a6578", border: "#dde1e8" },
+  font: "'Noto Sans JP', 'Helvetica Neue', Arial, sans-serif", mono: "'SF Mono', 'Consolas', monospace",
+  radius: 8, radiusLg: 12, shadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)", shadowMd: "0 4px 12px rgba(0,0,0,0.08)", shadowLg: "0 8px 24px rgba(0,0,0,0.12)",
+};
+const getTagStyle = (tag) => ({ VIP: C.tagVIP, "スポンサー": C.tagSponsor, "プレス": C.tagPress, "スピーカー": C.tagSpeaker }[tag] || C.tagGeneral);
+
+/* ── BUTTON ── */
+function Btn({ children, active, variant = "default", onClick, style: sx, ...rest }) {
+  const base = { display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: C.radius, fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "all 0.15s", fontFamily: C.font, lineHeight: 1.2 };
+  const variants = { default: { background: C.surface, border: `1px solid ${C.border}`, color: C.textSecondary }, primary: { background: C.primary, border: `1px solid ${C.primary}`, color: C.textOnPrimary }, ghost: { background: "transparent", border: "1px solid transparent", color: C.textSecondary }, danger: { background: "#fef2f2", border: "1px solid #fecaca", color: C.danger } };
+  const activeStyle = active ? { background: C.primaryLight, borderColor: C.primaryBorder, color: C.primary, fontWeight: 600 } : {};
+  return <button onClick={onClick} style={{ ...base, ...variants[variant], ...activeStyle, ...sx }} {...rest}>{children}</button>;
+}
+
+/* ── SETUP WIZARD ── */
+function SetupWizard({ onComplete }) {
+  const [step, setStep] = useState(1);
+  const [mapImage, setMapImage] = useState(null);
+  const [cameraList, setCameraList] = useState([]);
+  const [newCamName, setNewCamName] = useState("");
+  const [cameras, setCameras] = useState([]);
+  const [dragging, setDragging] = useState(null);
+  const fileInputRef = useRef(null);
+  const svgRef = useRef(null);
+  const handleMapUpload = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = (ev) => setMapImage(ev.target.result); r.readAsDataURL(f); };
+  const addCamera = () => { if (!newCamName.trim()) return; setCameraList((p) => [...p, { id: `cam-${Date.now()}`, label: newCamName.trim() }]); setNewCamName(""); };
+  const removeCamera = (id) => setCameraList((p) => p.filter((c) => c.id !== id));
+  const goToPlacement = () => { setCameras(cameraList.map((c, i) => ({ ...c, x: 8 + (i % 4) * 8, y: 10 + Math.floor(i / 4) * 10 }))); setStep(3); };
+  const getSVGCoords = useCallback((e) => { const svg = svgRef.current; if (!svg) return { x: 0, y: 0 }; const r = svg.getBoundingClientRect(); return { x: Math.max(2, Math.min(98, ((e.clientX - r.left) / r.width) * 100)), y: Math.max(2, Math.min(98, ((e.clientY - r.top) / r.height) * 100)) }; }, []);
+  const handleMouseDown = (e, id) => { e.preventDefault(); setDragging(id); };
+  const handleMouseMove = useCallback((e) => { if (!dragging) return; const c = getSVGCoords(e); setCameras((p) => p.map((cam) => cam.id === dragging ? { ...cam, x: c.x, y: c.y } : cam)); }, [dragging, getSVGCoords]);
+  const handleMouseUp = () => setDragging(null);
+
+  return (
+    <div style={{ height: "100vh", width: "100vw", background: C.bg, fontFamily: C.font, color: C.text, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "20px 32px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: C.primary, marginRight: 12 }}>セットアップ</div>
+        {[{n:1,label:"マップアップロード"},{n:2,label:"カメラ追加"},{n:3,label:"カメラ配置"}].map((s, i) => (
+          <div key={s.n} style={{ display: "flex", alignItems: "center", gap: 8, flex: i < 2 ? 1 : "none" }}>
+            <div style={{ width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, background: step >= s.n ? C.primary : C.surfaceHover, color: step >= s.n ? "white" : C.textMuted }}>{s.n}</div>
+            <span style={{ fontSize: 13, color: step >= s.n ? C.text : C.textMuted, fontWeight: step === s.n ? 600 : 400, whiteSpace: "nowrap" }}>{s.label}</span>
+            {i < 2 && <div style={{ flex: 1, height: 1, background: step > s.n ? C.primary : C.border, marginLeft: 4, marginRight: 4 }} />}
+          </div>
+        ))}
+      </div>
+      {step === 1 && (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", maxWidth: 460, padding: "0 24px" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>会場マップをアップロード</h2>
+            <p style={{ color: C.textSecondary, fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>イベント会場の見取り図をアップロードしてください。カメラの配置はこのマップ上で行います。</p>
+            {!mapImage ? (
+              <div onClick={() => fileInputRef.current?.click()} style={{ border: `2px dashed ${C.border}`, borderRadius: C.radiusLg, padding: "48px 32px", cursor: "pointer", background: C.surfaceAlt }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.primary; e.currentTarget.style.background = C.primaryDim; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.surfaceAlt; }}>
+                <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 4 }}>クリックして画像を選択</div>
+                <div style={{ fontSize: 12, color: C.textMuted }}>PNG, JPG, SVG対応</div>
+              </div>
+            ) : (
+              <div style={{ position: "relative", borderRadius: C.radiusLg, overflow: "hidden", border: `1px solid ${C.border}`, boxShadow: C.shadow }}>
+                <img src={mapImage} alt="venue" style={{ width: "100%", maxHeight: 260, objectFit: "cover", display: "block" }} />
+                <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
+                  <Btn onClick={() => fileInputRef.current?.click()} style={{ fontSize: 12, padding: "5px 12px", background: "rgba(255,255,255,0.9)" }}>変更</Btn>
+                  <Btn variant="danger" onClick={() => setMapImage(null)} style={{ fontSize: 12, padding: "5px 12px" }}>削除</Btn>
+                </div>
+              </div>
+            )}
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleMapUpload} style={{ display: "none" }} />
+            <div style={{ marginTop: 28, display: "flex", gap: 10, justifyContent: "center" }}>
+              <Btn onClick={() => { setMapImage(null); setStep(2); }}>スキップ</Btn>
+              {mapImage && <Btn variant="primary" onClick={() => setStep(2)}>次へ</Btn>}
+            </div>
+          </div>
+        </div>
+      )}
+      {step === 2 && (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", maxWidth: 500, padding: "0 24px", width: "100%" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>カメラを追加</h2>
+            <p style={{ color: C.textSecondary, fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>設置するカメラの名前（設置場所）を入力して追加してください。</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              <input type="text" placeholder="例：セッション会場A、展示エリアB..." value={newCamName} onChange={(e) => setNewCamName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addCamera(); }} style={{ flex: 1, padding: "10px 14px", borderRadius: C.radius, boxSizing: "border-box", background: C.surface, border: `1px solid ${C.border}`, color: C.text, fontSize: 14, outline: "none", fontFamily: C.font }} onFocus={(e) => e.target.style.borderColor = C.primary} onBlur={(e) => e.target.style.borderColor = C.border} />
+              <Btn variant="primary" onClick={addCamera} style={{ opacity: newCamName.trim() ? 1 : 0.5 }}>追加</Btn>
+            </div>
+            {cameraList.length > 0 && (
+              <div style={{ textAlign: "left", marginBottom: 24 }}>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600 }}>追加済みカメラ（{cameraList.length}台）</div>
+                {cameraList.map((cam, i) => (
+                  <div key={cam.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: C.radius, marginBottom: 4 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: 6, background: C.primaryLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: C.primary, flexShrink: 0 }}>{i + 1}</div>
+                    <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{cam.label}</div>
+                    <button onClick={() => removeCamera(cam.id)} style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 15, padding: "2px 6px" }} onMouseEnter={(e) => e.currentTarget.style.color = C.danger} onMouseLeave={(e) => e.currentTarget.style.color = C.textMuted}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <Btn onClick={() => setStep(1)}>戻る</Btn>
+              <Btn variant="primary" onClick={goToPlacement} style={{ opacity: cameraList.length > 0 ? 1 : 0.5 }}>カメラを配置する</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+      {step === 3 && (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, background: C.surface }}>
+            <div><h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>カメラをマップ上に配置</h3><p style={{ margin: "2px 0 0", fontSize: 13, color: C.textSecondary }}>各カメラをドラッグして正しい位置に配置してください（{cameras.length}台）</p></div>
+            <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => { setCameraList(cameras.map((c) => ({ id: c.id, label: c.label }))); setStep(2); }}>カメラ編集に戻る</Btn><Btn variant="primary" onClick={() => onComplete(mapImage, cameras)}>配置完了</Btn></div>
+          </div>
+          <div style={{ padding: "8px 24px 6px", display: "flex", gap: 6, flexWrap: "wrap", background: C.surfaceAlt, borderBottom: `1px solid ${C.borderLight}` }}>
+            {cameras.map((cam, i) => (<div key={cam.id} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", background: C.surface, borderRadius: 6, fontSize: 12, color: C.textSecondary, border: dragging === cam.id ? `1px solid ${C.primary}` : `1px solid ${C.border}` }}><span style={{ fontWeight: 700, color: C.primary }}>{i + 1}</span><span>{cam.label}</span></div>))}
+          </div>
+          <div style={{ flex: 1, padding: "12px 24px 24px", minHeight: 0 }} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+            <div style={{ width: "100%", height: "100%", borderRadius: C.radiusLg, overflow: "hidden", position: "relative", cursor: "crosshair", border: `1px solid ${C.border}`, boxShadow: C.shadow, display: "flex", alignItems: "center", justifyContent: "center", background: mapImage ? "#e8ecf0" : "#f0f4f8" }}>
+              {mapImage && <img src={mapImage} alt="venue" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", opacity: 0.6, pointerEvents: "none" }} />}
+              <svg ref={svgRef} viewBox="0 0 100 100" style={{ width: "100%", height: "100%", background: "transparent" }} preserveAspectRatio="xMidYMid meet">
+                <defs><pattern id="sg" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth="0.15" /></pattern></defs>
+                <rect width="100" height="100" fill="url(#sg)" />
+                {cameras.map((cam, i) => { const isDrag = dragging === cam.id; return (
+                  <g key={cam.id} onMouseDown={(e) => handleMouseDown(e, cam.id)} style={{ cursor: "grab" }}>
+                    <circle cx={cam.x} cy={cam.y} r="4" fill="none" stroke={isDrag ? C.primary : "rgba(44,116,187,0.2)"} strokeWidth="0.2" strokeDasharray="1 0.5" />
+                    <circle cx={cam.x} cy={cam.y} r="2.2" fill={isDrag ? C.primary : C.sub} stroke="white" strokeWidth="0.4" />
+                    <text x={cam.x} y={cam.y + 0.5} textAnchor="middle" fill="white" fontSize="1.4" fontWeight="700" style={{ pointerEvents: "none" }}>{i + 1}</text>
+                    <text x={cam.x} y={cam.y - 4} textAnchor="middle" fill={isDrag ? C.primary : C.textSecondary} fontSize="1.4" fontWeight="600">{cam.label}</text>
+                  </g>
+                ); })}
+              </svg>
+              <div style={{ position: "absolute", top: 10, left: 10, background: "rgba(255,255,255,0.9)", backdropFilter: "blur(8px)", borderRadius: C.radius, padding: "6px 12px", display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.primary, border: `1px solid ${C.primaryBorder}`, fontWeight: 600 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.warning }} />カメラ配置モード — ドラッグで移動
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── VENUE MAP ── */
+function VenueMap({ cameras, setCameras, selectedUser, checkins, viewMode, heatmapData, editMode, mapImage }) {
+  const svgRef = useRef(null); const [dragging, setDragging] = useState(null);
+  const maxHeat = Math.max(...Object.values(heatmapData), 1);
+  const camById = (id) => cameras.find((c) => c.id === id);
+  const heatColor = (count) => { const r = count / maxHeat; if (r < 0.25) return "rgba(18,165,216,0.12)"; if (r < 0.5) return "rgba(18,165,216,0.3)"; if (r < 0.75) return "rgba(212,167,44,0.4)"; return "rgba(229,83,75,0.5)"; };
+  const heatRadius = (count) => 3 + (count / maxHeat) * 5;
+  const getSVGCoords = useCallback((e) => { const svg = svgRef.current; if (!svg) return { x: 0, y: 0 }; const r = svg.getBoundingClientRect(); return { x: Math.max(2, Math.min(98, ((e.clientX - r.left) / r.width) * 100)), y: Math.max(2, Math.min(98, ((e.clientY - r.top) / r.height) * 100)) }; }, []);
+  const handleMouseDown = useCallback((e, id) => { if (!editMode) return; e.preventDefault(); setDragging(id); }, [editMode]);
+  const handleMouseMove = useCallback((e) => { if (!dragging || !editMode) return; const c = getSVGCoords(e); setCameras((p) => p.map((cam) => cam.id === dragging ? { ...cam, x: c.x, y: c.y } : cam)); }, [dragging, editMode, getSVGCoords, setCameras]);
+  const handleMouseUp = useCallback(() => setDragging(null), []);
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: C.radiusLg, overflow: "hidden", cursor: editMode ? "crosshair" : "default", border: `1px solid ${C.border}`, boxShadow: C.shadow, background: mapImage ? "#e8ecf0" : C.surface, display: "flex", alignItems: "center", justifyContent: "center" }} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+      {mapImage && <img src={mapImage} alt="venue" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", opacity: 0.5, pointerEvents: "none" }} />}
+      <svg ref={svgRef} viewBox="0 0 100 100" style={{ width: "100%", height: "100%", background: "transparent" }} preserveAspectRatio="xMidYMid meet">
+        <defs><pattern id="dg" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="rgba(0,0,0,0.03)" strokeWidth="0.15" /></pattern></defs>
+        <rect width="100" height="100" fill="url(#dg)" />
+        {viewMode === "heatmap" && cameras.map((cam) => { const count = heatmapData[cam.id] || 0; if (count === 0) return null; return (<g key={`h-${cam.id}`}><circle cx={cam.x} cy={cam.y} r={heatRadius(count) * 2.2} fill={heatColor(count)} opacity="0.5" /><circle cx={cam.x} cy={cam.y} r={heatRadius(count)} fill={heatColor(count)} opacity="0.7"><animate attributeName="r" from={heatRadius(count) * 0.85} to={heatRadius(count) * 1.2} dur="3s" repeatCount="indefinite" /><animate attributeName="opacity" from="0.7" to="0.25" dur="3s" repeatCount="indefinite" /></circle><text x={cam.x} y={cam.y + 0.6} textAnchor="middle" fill={C.text} fontSize="2" fontWeight="700" style={{ pointerEvents: "none" }}>{count}</text></g>); })}
+        {viewMode === "tracking" && selectedUser && checkins.length > 1 && checkins.slice(0, -1).map((ci, i) => { const from = camById(ci.camId); const to = camById(checkins[i + 1].camId); if (!from || !to) return null; return (<g key={`r-${i}`}><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={C.primary} strokeWidth="0.5" strokeOpacity="0.15" /><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={C.primary} strokeWidth="0.35" strokeOpacity="0.6" strokeDasharray="1.5 0.8"><animate attributeName="stroke-dashoffset" from="4" to="0" dur="1.5s" repeatCount="indefinite" /></line></g>); })}
+        {cameras.map((cam, idx) => { const isActive = viewMode === "tracking" && selectedUser && checkins.some((c) => c.camId === cam.id); const checkinIdx = viewMode === "tracking" && selectedUser ? checkins.findIndex((c) => c.camId === cam.id) : -1; const isDrag = dragging === cam.id; return (
+          <g key={cam.id} onMouseDown={(e) => handleMouseDown(e, cam.id)} style={{ cursor: editMode ? "grab" : "default" }}>
+            {editMode && <circle cx={cam.x} cy={cam.y} r="3.5" fill="none" stroke={isDrag ? C.primary : "rgba(44,116,187,0.2)"} strokeWidth="0.2" strokeDasharray="1 0.5" />}
+            {isActive && <circle cx={cam.x} cy={cam.y} r="3.2" fill={C.primary} opacity="0.1"><animate attributeName="r" from="2" to="5" dur="2.5s" repeatCount="indefinite" /><animate attributeName="opacity" from="0.15" to="0" dur="2.5s" repeatCount="indefinite" /></circle>}
+            <circle cx={cam.x} cy={cam.y} r={editMode ? "2" : isActive ? "1.8" : "1.3"} fill={isDrag ? C.primary : isActive ? C.primary : C.sub} stroke="white" strokeWidth="0.4" />
+            <text x={cam.x} y={cam.y - 3.2} textAnchor="middle" fill={isActive || isDrag ? C.primary : C.textSecondary} fontSize="1.3" fontWeight={isActive ? "600" : "400"}>{cam.label}</text>
+            {checkinIdx >= 0 && <g><circle cx={cam.x + 2.5} cy={cam.y - 1.5} r="1.5" fill={C.primary} /><text x={cam.x + 2.5} y={cam.y - 1} textAnchor="middle" fill="white" fontSize="1.2" fontWeight="700">{checkinIdx + 1}</text></g>}
+          </g>
+        ); })}
+      </svg>
+      <div style={{ position: "absolute", top: 10, left: 10, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", borderRadius: C.radius, padding: "5px 12px", display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: editMode ? C.warning : C.primary, border: `1px solid ${editMode ? "rgba(212,167,44,0.3)" : C.primaryBorder}`, fontWeight: 500 }}>
+        <div style={{ width: 6, height: 6, borderRadius: "50%", background: editMode ? C.warning : viewMode === "heatmap" ? C.danger : C.primary }} />
+        {editMode ? "カメラ再配置モード" : viewMode === "heatmap" ? "ヒートマップ" : selectedUser ? "個人トラッキング" : "会場マップ"}
+      </div>
+      {viewMode === "heatmap" && !editMode && (
+        <div style={{ position: "absolute", bottom: 10, right: 10, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", borderRadius: C.radius, padding: "8px 12px", fontSize: 11, color: C.textSecondary, border: `1px solid ${C.border}` }}>
+          <div style={{ marginBottom: 4, fontWeight: 600 }}>認証人数</div>
+          <div style={{ display: "flex", gap: 8 }}>{["少","","","多"].map((l, i) => <div key={i} style={{ display: "flex", alignItems: "center", gap: 3 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: ["rgba(18,165,216,0.25)","rgba(18,165,216,0.5)","rgba(212,167,44,0.55)","rgba(229,83,75,0.6)"][i] }} /><span>{l}</span></div>)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── NOTIFICATION PANEL ── */
+function NotificationPanel({ notifications, onClose, onClear }) {
+  return (
+    <div style={{ position: "absolute", top: 52, right: 16, width: 340, maxHeight: 400, background: C.surface, border: `1px solid ${C.border}`, borderRadius: C.radiusLg, boxShadow: C.shadowLg, zIndex: 100, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>リアルタイム通知</span>
+        <div style={{ display: "flex", gap: 6 }}><Btn variant="ghost" onClick={onClear} style={{ fontSize: 11, padding: "3px 8px" }}>クリア</Btn><Btn variant="ghost" onClick={onClose} style={{ fontSize: 11, padding: "3px 8px" }}>閉じる</Btn></div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 6 }}>
+        {notifications.length === 0 ? <div style={{ padding: 20, textAlign: "center", color: C.textMuted, fontSize: 12 }}>通知はまだありません</div>
+          : notifications.map((n, i) => (
+            <div key={n.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: C.radius, background: i === 0 ? C.primaryDim : "transparent", borderLeft: i === 0 ? `3px solid ${C.primary}` : "3px solid transparent", marginBottom: 1 }}>
+              <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: C.primaryLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: C.primary }}>{n.user.initials}</div>
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{n.user.name}</div><div style={{ fontSize: 11, color: C.textMuted }}>{n.cam.label}</div></div>
+              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: C.mono, flexShrink: 0 }}>{n.time}</div>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── USER CARD ── */
+function UserCard({ user, isSelected, onClick, lastCheckin, cameras }) {
+  const cam = lastCheckin ? cameras.find((c) => c.id === lastCheckin.camId) : null;
+  return (
+    <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: C.radius, background: isSelected ? C.primaryLight : "transparent", border: isSelected ? `1px solid ${C.primaryBorder}` : "1px solid transparent", cursor: "pointer", color: C.text, textAlign: "left", transition: "all 0.15s", fontFamily: C.font }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = C.surfaceHover; }} onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? C.primaryLight : "transparent"; }}>
+      <div style={{ width: 36, height: 36, borderRadius: 8, background: isSelected ? C.primary : C.primaryLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: isSelected ? "white" : C.primary, flexShrink: 0 }}>{user.initials}</div>
+      <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.name}</div>
+        <div style={{ fontSize: 11, color: C.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.company}</div>
+        {lastCheckin && cam && <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}><span style={{ color: C.success, fontSize: 8 }}>●</span> {lastCheckin.time} — {cam.label}</div>}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+        {user.tags.slice(0, 2).map((tag) => { const s = getTagStyle(tag); return <span key={tag} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, fontWeight: 600, background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>{tag}</span>; })}
+      </div>
+    </button>
+  );
+}
+
+/* ── MAIN APP ── */
+function App() {
+  const [setupDone, setSetupDone] = useState(false);
+  const [cameras, setCameras] = useState([]);
+  const [mapImage, setMapImage] = useState(null);
+  const [allCheckins, setAllCheckins] = useState({});
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [viewMode, setViewMode] = useState("tracking");
+  const [timeFilter, setTimeFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sideExpanded, setSideExpanded] = useState(true);
+  const [editMode, setEditMode] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [liveEnabled, setLiveEnabled] = useState(true);
+
+  const selectedUser = USERS.find((u) => u.id === selectedUserId);
+  const filteredCheckins = selectedUserId ? getFilteredCheckins(allCheckins, selectedUserId, timeFilter) : [];
+  const heatmapData = getHeatmapData(cameras, allCheckins, timeFilter, tagFilter);
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  useEffect(() => { if (!liveEnabled || !setupDone || cameras.length === 0) return; const interval = setInterval(() => { setNotifications((p) => [generateMockNotification(cameras), ...p].slice(0, 50)); }, 4000 + Math.random() * 6000); return () => clearInterval(interval); }, [liveEnabled, setupDone, cameras]);
+  const handleSetupComplete = (img, cams) => { setMapImage(img); setCameras(cams); setAllCheckins(generateCheckins(cams)); setSetupDone(true); };
+  const filteredUsers = USERS.filter((u) => { const ms = searchQuery === "" || u.name.includes(searchQuery) || u.company.includes(searchQuery); const mt = tagFilter === "all" || u.tags.includes(tagFilter); return ms && mt; });
+  const handleUserClick = (id) => { if (selectedUserId === id) setSelectedUserId(null); else { setSelectedUserId(id); if (viewMode === "heatmap") setViewMode("tracking"); } };
+  const getLastCheckin = (id) => { const c = allCheckins[id] || []; return c.length > 0 ? c[c.length - 1] : null; };
+
+  if (!setupDone) return <SetupWizard onComplete={handleSetupComplete} />;
+
+  return (
+    <div style={{ display: "flex", height: "100vh", width: "100vw", background: C.bg, fontFamily: C.font, color: C.text, overflow: "hidden" }}>
+      <div style={{ width: sideExpanded ? 300 : 0, flexShrink: 0, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", overflow: "hidden", transition: "width 0.25s ease" }}>
+        <div style={{ padding: "16px 16px 12px", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 }}>EVENT ANALYTICS</div>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>参加者トラッキング</h2>
+        </div>
+        <div style={{ padding: "10px 16px 6px" }}>
+          <input type="text" placeholder="名前・会社名で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ width: "100%", padding: "8px 12px", borderRadius: C.radius, boxSizing: "border-box", background: C.surfaceAlt, border: `1px solid ${C.border}`, color: C.text, fontSize: 13, outline: "none", fontFamily: C.font }} onFocus={(e) => e.target.style.borderColor = C.primary} onBlur={(e) => e.target.style.borderColor = C.border} />
+        </div>
+        <div style={{ padding: "4px 16px 6px", display: "flex", gap: 4, flexWrap: "wrap" }}>
+          <Btn active={tagFilter === "all"} variant="ghost" onClick={() => setTagFilter("all")} style={{ padding: "3px 8px", fontSize: 11 }}>全て</Btn>
+          {TAGS.map((tag) => <Btn key={tag} active={tagFilter === tag} variant="ghost" onClick={() => setTagFilter(tagFilter === tag ? "all" : tag)} style={{ padding: "3px 8px", fontSize: 11 }}>{tag}</Btn>)}
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "2px 6px 12px" }}>
+          <div style={{ fontSize: 11, color: C.textMuted, padding: "4px 8px 6px" }}>{filteredUsers.length}名 表示中</div>
+          {filteredUsers.map((user) => <UserCard key={user.id} user={user} isSelected={selectedUserId === user.id} onClick={() => handleUserClick(user.id)} lastCheckin={getLastCheckin(user.id)} cameras={cameras} />)}
+        </div>
+        {selectedUser && (
+          <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px", maxHeight: 240, overflowY: "auto", background: C.surfaceAlt }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, color: "white" }}>{selectedUser.initials}</div>
+              <div><div style={{ fontWeight: 700, fontSize: 14 }}>{selectedUser.name}</div><div style={{ fontSize: 11, color: C.textMuted }}>{selectedUser.company}</div></div>
+            </div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, fontWeight: 600 }}>チェックイン履歴</div>
+            {filteredCheckins.map((ci, i) => { const cam = cameras.find((c) => c.id === ci.camId); return (
+              <div key={i} style={{ display: "flex", alignItems: "stretch", gap: 10 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 14, flexShrink: 0 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 4, background: i === filteredCheckins.length - 1 ? C.primary : C.border }} />
+                  {i < filteredCheckins.length - 1 && <div style={{ flex: 1, width: 1, background: C.borderLight }} />}
+                </div>
+                <div style={{ paddingBottom: 8 }}>
+                  <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 600, color: i === filteredCheckins.length - 1 ? C.primary : C.text }}>{ci.time}</div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>{cam?.label}</div>
+                </div>
+              </div>
+            ); })}
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
+        <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px solid ${C.border}`, background: C.surface, flexWrap: "wrap" }}>
+          <Btn onClick={() => setSideExpanded(!sideExpanded)} style={{ padding: "7px 10px" }}>{sideExpanded ? "◀" : "▶"}</Btn>
+          <div style={{ display: "flex", gap: 2, background: C.surfaceAlt, borderRadius: C.radius, padding: 2, border: `1px solid ${C.borderLight}` }}>
+            <Btn active={viewMode === "tracking" && !editMode} variant="ghost" onClick={() => { setViewMode("tracking"); setEditMode(false); }} style={{ borderRadius: 6 }}>トラッキング</Btn>
+            <Btn active={viewMode === "heatmap" && !editMode} variant="ghost" onClick={() => { setViewMode("heatmap"); setEditMode(false); setSelectedUserId(null); }} style={{ borderRadius: 6 }}>ヒートマップ</Btn>
+          </div>
+          <div style={{ width: 1, height: 22, background: C.border }} />
+          <Btn active={editMode} onClick={() => setEditMode(!editMode)}>{editMode ? "配置完了" : "カメラ再配置"}</Btn>
+          <Btn onClick={() => setSetupDone(false)}>セットアップ</Btn>
+          <select value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)} style={{ padding: "7px 12px", borderRadius: C.radius, fontSize: 13, background: C.surface, border: `1px solid ${C.border}`, color: C.text, cursor: "pointer", outline: "none", fontFamily: C.font }}>
+            {TIME_SLOTS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <div style={{ flex: 1 }} />
+          <Btn active={liveEnabled} onClick={() => setLiveEnabled(!liveEnabled)} style={{ gap: 6 }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: liveEnabled ? C.success : C.textMuted, animation: liveEnabled ? "pulse 2s infinite" : "none" }} />LIVE
+          </Btn>
+          <Btn active={showNotifications} onClick={() => { setShowNotifications(!showNotifications); setNotifications((p) => p.map((n) => ({ ...n, read: true }))); }} style={{ position: "relative", padding: "7px 10px" }}>
+            通知{unreadCount > 0 && <div style={{ position: "absolute", top: -3, right: -3, width: 16, height: 16, borderRadius: "50%", background: C.danger, color: "white", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{unreadCount > 9 ? "9+" : unreadCount}</div>}
+          </Btn>
+          <div style={{ display: "flex", gap: 12, fontSize: 12, color: C.textSecondary, marginLeft: 4 }}>
+            <span>参加者 <strong style={{ color: C.text }}>{USERS.length}</strong></span>
+            <span>カメラ <strong style={{ color: C.text }}>{cameras.length}</strong></span>
+          </div>
+        </div>
+        {showNotifications && <NotificationPanel notifications={notifications} onClose={() => setShowNotifications(false)} onClear={() => setNotifications([])} />}
+        <div style={{ flex: 1, padding: 14, minHeight: 0 }}>
+          <VenueMap cameras={cameras} setCameras={setCameras} selectedUser={selectedUser} checkins={filteredCheckins} viewMode={editMode ? "edit" : viewMode} heatmapData={heatmapData} editMode={editMode} mapImage={mapImage} />
+        </div>
+        {selectedUser && viewMode === "tracking" && !editMode && (
+          <div style={{ padding: "8px 16px 12px", borderTop: `1px solid ${C.border}`, background: C.surface, overflowX: "auto" }}>
+            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, fontWeight: 600 }}>{selectedUser.name} — 移動タイムライン</div>
+            <div style={{ display: "flex", alignItems: "center", minWidth: "max-content" }}>
+              {filteredCheckins.map((ci, i) => { const cam = cameras.find((c) => c.id === ci.camId); const isLast = i === filteredCheckins.length - 1; return (
+                <div key={i} style={{ display: "flex", alignItems: "center" }}>
+                  <div style={{ padding: "7px 12px", borderRadius: C.radius, background: isLast ? C.primaryLight : C.surfaceAlt, border: `1px solid ${isLast ? C.primaryBorder : C.border}`, whiteSpace: "nowrap" }}>
+                    <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 600, color: isLast ? C.primary : C.text }}>{ci.time}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{cam?.label}</div>
+                  </div>
+                  {i < filteredCheckins.length - 1 && <div style={{ width: 20, height: 1, background: C.border, flexShrink: 0 }} />}
+                </div>
+              ); })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById("root"));
+</script>
+</body>
+</html>
